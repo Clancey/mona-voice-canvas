@@ -1,0 +1,8 @@
+.DS_Store
+node_modules/
+backend/asr/.venv/
+backend/tts/.venv/
+backend/tts/VibeVoice/
+backend/.run/
+*.pyc
+__pycache__/

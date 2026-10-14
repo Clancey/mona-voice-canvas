@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Hey Mona</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <main>
+    <header>
+      <h1>🎙️ Hey Mona</h1>
+      <span id="phase-badge" class="badge" data-phase="idle">idle</span>
+    </header>
+
+    <section id="backend-warning" class="warning hidden">
+      Local backend(s) unreachable. Run <code>backend/start.sh</code>, then reload. See
+      <code>backend/README.md</code>.
+    </section>
+
+    <section class="controls">
+      <button id="ptt-button" class="ptt">Hold to talk</button>
+      <label class="toggle">
+        <input type="checkbox" id="wake-word-toggle" />
+        Wake word ("Hey Mona")
+      </label>
+      <button id="train-button" class="secondary">Train wake word&hellip;</button>
+      <button id="interrupt-button" class="secondary hidden">Stop speaking</button>
+    </section>
+
+    <section class="transcript">
+      <div class="bubble user hidden" id="user-bubble"></div>
+      <div class="bubble assistant hidden" id="assistant-bubble"></div>
+    </section>
+
+    <section id="train-panel" class="panel hidden">
+      <h2>Train "Hey Mona"</h2>
+      <p>Record a few takes of you saying "Hey Mona", then a few seconds of
+        normal background/room noise (not the phrase). More takes = better
+        accuracy. This never leaves your machine.</p>
+      <div class="train-row">
+        <button id="record-positive">Record "Hey Mona" take</button>
+        <span id="positive-count">0 takes</span>
+      </div>
+      <div class="train-row">
+        <button id="record-negative">Record background noise (5s)</button>
+        <span id="negative-count">0 takes</span>
+      </div>
+      <div class="train-row">
+        <button id="run-training" disabled>Train classifier</button>
+        <button id="reset-training" class="secondary">Reset</button>
+      </div>
+      <p id="train-status" class="muted"></p>
+      <button id="close-train" class="secondary">Close</button>
+    </section>
+
+    <footer class="muted" id="footer-status">starting&hellip;</footer>
+  </main>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
