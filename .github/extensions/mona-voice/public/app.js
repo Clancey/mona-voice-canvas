@@ -1,6 +1,23 @@
 import { MicStream, encodeWav } from "/mic.js";
 import { loadEmbeddingPipeline, trainClassifier, WakeWordDetector } from "/wakeword.js";
 
+// This canvas's loopback server requires a per-instance capability token
+// (any local process that discovers the ephemeral port could otherwise
+// inject real Copilot user turns or wipe wake-word training). The host
+// embeds it in the URL it loads this page from; propagate it onto every
+// request this page makes back to that same server.
+const AUTH_TOKEN = new URLSearchParams(location.search).get("token") || "";
+
+function authUrl(path) {
+  const url = new URL(path, location.origin);
+  if (AUTH_TOKEN) url.searchParams.set("token", AUTH_TOKEN);
+  return url.toString();
+}
+
+function authFetch(path, opts) {
+  return fetch(authUrl(path), opts);
+}
+
 const $ = (id) => document.getElementById(id);
 const phaseBadge = $("phase-badge");
 const backendWarning = $("backend-warning");
@@ -38,7 +55,7 @@ function showAssistantReply(text) {
 }
 
 // ---- SSE: drives all passive state updates pushed from extension.mjs ----
-const events = new EventSource("/events");
+const events = new EventSource(authUrl("/events"));
 events.onmessage = (ev) => {
   const data = JSON.parse(ev.data);
   if (data.type === "state") {
@@ -95,15 +112,28 @@ const player = new StreamPlayer();
 async function playUtteranceResponse(res) {
   const reader = res.body.getReader();
   let headerParsed = false;
+  // `carry` holds any bytes not yet consumed: pre-header bytes while waiting
+  // for the newline, and post-header PCM bytes left over because the chunk
+  // length wasn't a multiple of 4 (a Float32 sample). Every chunk boundary
+  // is an arbitrary network/TCP split, not an audio-sample boundary, so this
+  // carry buffer must persist for the whole stream -- dropping the leftover
+  // bytes (as an earlier version of this code did) corrupts/desyncs audio.
   let carry = new Uint8Array(0);
+
+  function appendCarry(bytes) {
+    const combined = new Uint8Array(carry.length + bytes.length);
+    combined.set(carry, 0);
+    combined.set(bytes, carry.length);
+    return combined;
+  }
+
   while (true) {
     const { value, done } = await reader.read();
     if (done) break;
-    let chunk = value;
+
+    let combined = appendCarry(value);
+
     if (!headerParsed) {
-      const combined = new Uint8Array(carry.length + chunk.length);
-      combined.set(carry, 0);
-      combined.set(chunk, carry.length);
       const text = new TextDecoder().decode(combined);
       const newlineIdx = text.indexOf("\n");
       if (newlineIdx === -1) {
@@ -112,12 +142,19 @@ async function playUtteranceResponse(res) {
       }
       const header = JSON.parse(text.slice(0, newlineIdx));
       player.reset(header.sampleRate);
-      const byteOffset = new TextEncoder().encode(text.slice(0, newlineIdx + 1)).length;
-      chunk = combined.slice(byteOffset);
+      const headerByteLen = new TextEncoder().encode(text.slice(0, newlineIdx + 1)).length;
+      combined = combined.slice(headerByteLen); // fresh buffer, byteOffset 0
       headerParsed = true;
     }
-    if (chunk.length === 0) continue;
-    const float32 = new Float32Array(chunk.buffer, chunk.byteOffset, Math.floor(chunk.length / 4));
+
+    const alignedLen = combined.length - (combined.length % 4);
+    if (alignedLen === 0) {
+      carry = combined;
+      continue;
+    }
+    const aligned = combined.slice(0, alignedLen); // fresh buffer, byteOffset 0 -- safe for Float32Array
+    carry = combined.slice(alignedLen); // leftover 0-3 bytes, carried to next read
+    const float32 = new Float32Array(aligned.buffer, 0, alignedLen / 4);
     player.enqueue(float32.slice());
   }
 }
@@ -132,7 +169,7 @@ async function sendUtterance() {
   recordingBuffer = [];
   abortController = new AbortController();
   try {
-    const res = await fetch("/utterance", { method: "POST", body: wav, signal: abortController.signal });
+    const res = await authFetch("/utterance", { method: "POST", body: wav, signal: abortController.signal });
     if (res.status === 204) {
       setPhase("listening");
       return;
@@ -154,7 +191,7 @@ async function sendUtterance() {
 async function interrupt() {
   player.stop();
   abortController?.abort();
-  await fetch("/interrupt", { method: "POST" }).catch(() => {});
+  await authFetch("/interrupt", { method: "POST" }).catch(() => {});
 }
 interruptButton.onclick = interrupt;
 
@@ -194,8 +231,8 @@ const WAKE_RECORD_MS = 4000; // fixed-length capture after trigger; no VAD endpo
 
 async function enableWakeWord() {
   footerStatus.textContent = "Loading wake-word models…";
-  const pipeline = await loadEmbeddingPipeline();
-  const classifierRes = await fetch("/wakeword/classifier").then((r) => r.json());
+  const pipeline = await loadEmbeddingPipeline(authUrl);
+  const classifierRes = await authFetch("/wakeword/classifier").then((r) => r.json());
   if (!classifierRes.trained) {
     footerStatus.textContent = "No trained wake-word classifier yet -- use Train wake word first.";
     wakeToggle.checked = false;
@@ -256,7 +293,7 @@ let positiveEmbeddings = [];
 let negativeEmbeddings = [];
 
 async function recordTake(seconds, onEmbedding) {
-  if (!trainPipeline) trainPipeline = await loadEmbeddingPipeline();
+  if (!trainPipeline) trainPipeline = await loadEmbeddingPipeline(authUrl);
   trainPipeline.reset();
   const collected = [];
   const mic = new MicStream({
@@ -301,7 +338,7 @@ function updateTrainButton() {
 $("run-training").onclick = async () => {
   $("train-status").textContent = "Training…";
   const classifier = trainClassifier(positiveEmbeddings, negativeEmbeddings);
-  await fetch("/wakeword/classifier", {
+  await authFetch("/wakeword/classifier", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(classifier),
@@ -315,13 +352,13 @@ $("reset-training").onclick = async () => {
   $("positive-count").textContent = "0 takes";
   $("negative-count").textContent = "0 takes";
   updateTrainButton();
-  await fetch("/wakeword/reset", { method: "POST" });
+  await authFetch("/wakeword/reset", { method: "POST" });
   $("train-status").textContent = "Reset.";
 };
 
 // ---- Startup: surface backend reachability honestly ----
 async function checkHealth() {
-  const health = await fetch("/health").then((r) => r.json()).catch(() => ({ asrReachable: false, ttsReachable: false }));
+  const health = await authFetch("/health").then((r) => r.json()).catch(() => ({ asrReachable: false, ttsReachable: false }));
   backendWarning.classList.toggle("hidden", health.asrReachable && health.ttsReachable);
   footerStatus.textContent = health.asrReachable && health.ttsReachable ? "Ready." : "Backend(s) not running.";
 }

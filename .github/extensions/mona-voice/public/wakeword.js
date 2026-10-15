@@ -13,11 +13,11 @@ export const EMBEDDING_DIM = 96;
 const MEL_SCALE = 0.1;
 const MEL_OFFSET = 2.0;
 
-export async function loadEmbeddingPipeline() {
+export async function loadEmbeddingPipeline(authUrl = (p) => p) {
   ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/";
   const [melBytes, embBytes] = await Promise.all([
-    fetch("/models/melspectrogram.onnx").then((r) => r.arrayBuffer()),
-    fetch("/models/embedding_model.onnx").then((r) => r.arrayBuffer()),
+    fetch(authUrl("/models/melspectrogram.onnx")).then((r) => r.arrayBuffer()),
+    fetch(authUrl("/models/embedding_model.onnx")).then((r) => r.arrayBuffer()),
   ]);
   const melspecSession = await ort.InferenceSession.create(melBytes, { executionProviders: ["wasm"] });
   const embeddingSession = await ort.InferenceSession.create(embBytes, { executionProviders: ["wasm"] });

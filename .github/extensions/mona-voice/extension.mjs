@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { dirname, join, extname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -141,10 +142,30 @@ async function handleUtterance(req, res, instance, session) {
 }
 
 async function startServer(instanceId, session) {
-  const instance = { sseClients: new Set(), abortController: null };
+  // Loopback-only does not mean "trusted": any local process can discover
+  // an ephemeral port and connect. Since /utterance can inject real Copilot
+  // user turns and /wakeword/* can overwrite the user's trained classifier,
+  // require a per-instance capability token on every request. The host only
+  // ever sees the URL we return from `open()` (with the token embedded), so
+  // the iframe itself always has it; nothing else does.
+  const token = randomBytes(24).toString("hex");
+  const instance = { sseClients: new Set(), abortController: null, token };
+
+  function isAuthorized(url) {
+    const provided = url.searchParams.get("token") || "";
+    const expected = Buffer.from(instance.token, "utf-8");
+    const given = Buffer.from(provided, "utf-8");
+    return given.length === expected.length && timingSafeEqual(given, expected);
+  }
 
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, "http://127.0.0.1");
+
+    if (!isAuthorized(url)) {
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "missing or invalid token" }));
+      return;
+    }
 
     if (url.pathname === "/events") {
       res.writeHead(200, {
@@ -246,7 +267,7 @@ async function startServer(instanceId, session) {
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const port = server.address().port;
   instance.server = server;
-  instance.url = `http://127.0.0.1:${port}/`;
+  instance.url = `http://127.0.0.1:${port}/?token=${token}`;
   instances.set(instanceId, instance);
   return instance;
 }
