@@ -42,7 +42,7 @@ from transformers.cache_utils import DynamicCache  # noqa: E402
 from transformers.modeling_outputs import BaseModelOutputWithPast  # noqa: E402
 
 MODEL_PATH = os.environ.get("MONA_TTS_MODEL", "microsoft/VibeVoice-Realtime-0.5B")
-SPEAKER_NAME = os.environ.get("MONA_TTS_SPEAKER", "Wayne")
+SPEAKER_NAME = os.environ.get("MONA_TTS_SPEAKER", "en-Carter_man")
 SAMPLE_RATE = 24000
 
 app = FastAPI()
@@ -95,8 +95,17 @@ class _Model:
                 f"voice preset '{SPEAKER_NAME}' not found at {voice_path} -- "
                 "run backend/setup.sh to clone VibeVoice with its bundled voices."
             )
+        # weights_only=True (torch's safer default since 2.6) rejects these
+        # checkpoints even with safe_globals registered -- torch's unpickler
+        # only allows SETITEMS on literal dict/OrderedDict/Counter, not
+        # ModelOutput subclasses like BaseModelOutputWithPast, so the
+        # allow-list approach can't work here. voice_path is one of the
+        # .pt files bundled directly in the official microsoft/VibeVoice git
+        # clone (not fetched from an untrusted/user-supplied location), so
+        # weights_only=False is an intentional, scoped exception rather than
+        # loading arbitrary untrusted pickles.
         with torch.serialization.safe_globals([BaseModelOutputWithPast, DynamicCache]):
-            cls.voice_sample = torch.load(voice_path, map_location=cls.device, weights_only=True)
+            cls.voice_sample = torch.load(voice_path, map_location=cls.device, weights_only=False)
 
 
 @app.get("/health")
