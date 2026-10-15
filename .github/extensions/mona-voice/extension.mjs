@@ -16,6 +16,11 @@ import { backendHealth, transcribe, speakStream, stopSpeaking } from "./lib/back
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(HERE, "public");
 
+// How long a voice utterance will wait for the hosting session to finish
+// replying before giving up. Default 10 minutes -- real turns can involve
+// tool calls and multi-step reasoning, not just a quick chat completion.
+const SESSION_REPLY_TIMEOUT_MS = Number(process.env.MONA_SESSION_TIMEOUT_MS || 600_000);
+
 const MIME = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -97,7 +102,13 @@ async function handleUtterance(req, res, instance, session) {
     // generate its own answer. The transcript is delivered as a real user
     // turn into whatever Copilot session this canvas is open inside, and we
     // speak back whatever that session's own assistant actually replied.
-    const reply = await session.sendAndWait({ prompt: transcript, mode: "immediate" });
+    // The default sendAndWait timeout (60s) is too short for real assistant
+    // turns that do actual work (tool calls, multi-step reasoning). A voice
+    // utterance should wait as long as a normal chat turn would.
+    const reply = await session.sendAndWait(
+      { prompt: transcript, mode: "immediate" },
+      SESSION_REPLY_TIMEOUT_MS,
+    );
     const replyText = reply?.data?.content ?? "";
     if (!replyText.trim()) {
       broadcast(instance, { type: "state", phase: "listening" });
