@@ -12,7 +12,14 @@ yourself and leave them running while you use the canvas.
 ## Setup
 
 Requires Python 3.11 (`~/.local/bin/python3.11` on this machine; override
-with `MONA_PYTHON=/path/to/python3.11`).
+with `MONA_PYTHON=/path/to/python3.11`) and **`ffmpeg` on PATH** --
+`mlx-whisper` shells out to it to decode incoming audio and fails at
+request time without it (not installable via pip; `setup.sh` checks for it
+and exits with instructions if missing):
+
+```bash
+brew install ffmpeg
+```
 
 ```bash
 cd backend
@@ -71,8 +78,20 @@ reply's audio to finish generating before sending anything back. The ~200ms
 figure quoted in VibeVoice's docs applies to their separate token-by-token
 streaming websocket demo (`demo/vibevoice_realtime_demo.py` / `web/app.py`),
 which incrementally decodes audio as text arrives; that incremental decode
-loop is *not* implemented here. **Real end-to-end latency on this Mac has
-not been benchmarked** -- do this before relying on it:
+loop is *not* implemented here.
+
+**Measured end-to-end latency on this Mac** (M-series, MPS backend, model
+already warm/resident -- first call after process start is slower due to
+weight loading): generating a full reply's audio took **1.9s-3.2s
+wall-clock for 4.7s-5.3s of resulting speech**, i.e. roughly **1.6x-2.4x
+faster than real-time**, not the ~200ms *first-audio-chunk* figure VibeVoice
+quotes for their incremental streaming demo (that number isn't comparable
+to "whole clip, synchronous" latency measured here). In practice this means:
+the user finishes talking, then waits silently for ~2-5s (scaling with
+reply length) before Mona starts speaking -- noticeably less immediate than
+a true streaming assistant, but usable for a request/response voice loop.
+Re-run this benchmark yourself if you change hardware, model size, or the
+VibeVoice version:
 
 ```bash
 curl -s -X POST http://127.0.0.1:8766/tts/speak \

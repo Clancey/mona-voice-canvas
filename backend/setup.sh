@@ -12,6 +12,14 @@ if ! command -v "$PYTHON" >/dev/null 2>&1; then
   exit 1
 fi
 
+if ! command -v ffmpeg >/dev/null 2>&1; then
+  echo "error: ffmpeg not found on PATH. mlx-whisper shells out to ffmpeg" >&2
+  echo "to decode audio and will fail at request time without it (this" >&2
+  echo "isn't installable via pip). Install it first, e.g.:" >&2
+  echo "    brew install ffmpeg" >&2
+  exit 1
+fi
+
 echo "== ASR backend (mlx-whisper) =="
 cd asr
 "$PYTHON" -m venv .venv

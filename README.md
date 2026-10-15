@@ -93,15 +93,26 @@ nothing leaves your machine.
 
 ## Known MVP limitations (read before relying on this)
 
-- **TTS latency is not yet benchmarked.** The current implementation
-  generates a full reply's audio before any playback starts (see
-  `backend/README.md`'s latency section) rather than true token-level
-  streaming. Measure it with the `curl` command in that README before
-  assuming it feels real-time.
+- **TTS latency, measured on this Mac (M-series, MPS, warm model): 1.9s-3.2s
+  wall-clock per reply** (generating 4.7s-5.3s of resulting speech), i.e.
+  roughly 1.6x-2.4x faster than real-time, but delivered as one block after
+  generation finishes, not streamed token-by-token -- see
+  `backend/README.md`'s latency section for the full measurement and how to
+  re-run it on your own hardware.
+- **`ffmpeg` must be on PATH** (`brew install ffmpeg`) -- `mlx-whisper`
+  shells out to it for audio decoding; `backend/setup.sh` now checks for
+  this and exits with instructions if it's missing.
 - **Wake-word capture is fixed-length (4s), not VAD-endpointed.** After
   "Hey Mona" triggers, it records for a fixed window rather than detecting
   when you stop talking. Fine for short questions, awkward for longer ones.
 - **Mid-generation barge-in only stops transport/playback, not the model
-  call already in flight** (no true incremental generation yet).
+  call already in flight** (no true incremental generation yet; verified via
+  direct `/tts/stop` HTTP test -- mid-generation cancellation correctly
+  suppresses all audio chunk delivery, confirmed empirically, not just by
+  reading the code).
+- **Voice turns can legitimately take longer than a typical chat reply**
+  (tool calls, multi-step reasoning). `session.sendAndWait`'s default 60s
+  timeout was too short in real testing and is now configurable via
+  `MONA_SESSION_TIMEOUT_MS` (extension.mjs), defaulting to 10 minutes.
 - English-only TTS (VibeVoice-Realtime-0.5B's primary focus); ASR language
   support follows whichever Whisper model you configure.
